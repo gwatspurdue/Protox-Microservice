@@ -2,27 +2,51 @@
 
 This module manages all interactions with the Protox external service,
 handling asynchronous SMILES predictions through task submission and polling.
+Implements proper rate limiting and quota management.
 """
 
 from typing import Dict, List, Any, Optional
 import httpx
 import logging
 import time
+import json
 import pandas as pd
 from io import StringIO
 
 logger = logging.getLogger(__name__)
 
 
+class QuotaExceededException(Exception):
+    """Raised when daily quota has been exceeded."""
+    pass
+
+
+class RateLimitedException(Exception):
+    """Raised when rate limit is hit and must wait."""
+    pass
+
+
 class ProtoxHandler:
     """Handle interactions with Protox API for molecular property predictions."""
 
     # Protox API configuration
-    SUBMIT_URL: str = "https://tox.charite.de/protox3/src/api_submit.php"
+    ENQUEUE_URL: str = "https://tox.charite.de/protox3/src/api_enqueue.php"
     RETRIEVE_URL: str = "https://tox.charite.de/protox3/src/api_retrieve.php"
     RESULT_BASE_URL: str = "https://tox.charite.de/protox3/csv"
     TIMEOUT: int = 30
     POLL_INTERVAL: int = 30  # seconds between status checks
+
+    # Available toxicity models
+    AVAILABLE_MODELS: Dict[str, str] = {
+        "bbb": "Blood-brain barrier permeability",
+        "hia": "Human intestinal absorption",
+        "pgp": "P-glycoprotein inhibitor",
+        "cyp2d6": "CYP2D6 inhibitor",
+        "cyp3a4": "CYP3A4 inhibitor",
+        "ames": "Ames mutagenicity",
+        "skin_sens": "Skin sensitization",
+        "acute_tox": "Acute toxicity",
+    }
 
     # Available properties for predictions
     AVAILABLE_PROPERTIES: List[str] = [
@@ -31,34 +55,43 @@ class ProtoxHandler:
 
     def __init__(
         self,
-        submit_url: Optional[str] = None,
+        enqueue_url: Optional[str] = None,
         retrieve_url: Optional[str] = None,
         result_base_url: Optional[str] = None,
         timeout: Optional[int] = None,
         poll_interval: Optional[int] = None,
+        models: Optional[List[str]] = None,
+        input_type: str = "smiles",
     ):
         """Initialize the Protox handler.
 
         Args:
-            submit_url: Optional custom submission endpoint
+            enqueue_url: Optional custom enqueue endpoint
             retrieve_url: Optional custom retrieval endpoint
             result_base_url: Optional custom results base URL
             timeout: Optional custom request timeout in seconds
             poll_interval: Optional custom polling interval in seconds
+            models: List of toxicity models to request (default: all available)
+            input_type: Type of input data, e.g., 'smiles' (default: 'smiles')
         """
-        self.submit_url = submit_url or self.SUBMIT_URL
+        self.enqueue_url = enqueue_url or self.ENQUEUE_URL
         self.retrieve_url = retrieve_url or self.RETRIEVE_URL
         self.result_base_url = result_base_url or self.RESULT_BASE_URL
         self.timeout = timeout or self.TIMEOUT
         self.poll_interval = poll_interval or self.POLL_INTERVAL
+        self.input_type = input_type
+        self.models = models or list(self.AVAILABLE_MODELS.keys())
         self._task_cache: Dict[str, Any] = {}  # Maps task_id to results
 
-    def submit_prediction(self, smiles: str, property_name: str = "toxicity") -> Dict[str, Any]:
+    def submit_prediction(
+        self, smiles: str, property_name: str = "toxicity", models: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """Submit a prediction task to Protox API.
 
         Args:
             smiles: A SMILES string to process
             property_name: The molecular property to predict
+            models: Optional list of specific models to request (None = use default)
 
         Returns:
             Dictionary with task_id or error information
@@ -75,13 +108,29 @@ class ProtoxHandler:
                 "error": f"Property '{property_name}' not supported",
             }
 
+        # Use provided models or default
+        request_models = models or self.models
+
         try:
-            task_id = self._submit_task(smiles)
+            task_id = self._submit_task(smiles, request_models)
+            logger.info(f"Successfully submitted SMILES: {smiles}, Task ID: {task_id}")
             return {
                 "status": "submitted",
                 "task_id": task_id,
                 "smiles": smiles,
                 "property": property_name,
+            }
+        except QuotaExceededException as e:
+            logger.error(f"Daily quota exceeded: {str(e)}")
+            return {
+                "status": "error",
+                "error": "Daily quota exceeded",
+            }
+        except RateLimitedException as e:
+            logger.error(f"Rate limited: {str(e)}")
+            return {
+                "status": "error",
+                "error": "Rate limited, please retry later",
             }
         except Exception as e:
             logger.error(f"Error submitting prediction for SMILES {smiles}: {str(e)}")
@@ -91,7 +140,7 @@ class ProtoxHandler:
             }
 
     def predict_single(
-        self, smiles: str, property_name: str = "toxicity", max_polls: Optional[int] = None
+        self, smiles: str, property_name: str = "toxicity", max_polls: Optional[int] = None, models: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """Predict a molecular property for a single SMILES string with polling.
 
@@ -101,6 +150,7 @@ class ProtoxHandler:
             smiles: A SMILES string to process
             property_name: The molecular property to predict
             max_polls: Maximum number of polls before timing out (None = unlimited)
+            models: Optional list of specific models to request (None = use default)
 
         Returns:
             Dictionary containing prediction results with status field
@@ -121,9 +171,12 @@ class ProtoxHandler:
                 "error": f"Property '{property_name}' not supported",
             }
 
+        # Use provided models or default
+        request_models = models or self.models
+
         try:
             # Submit task
-            task_id = self._submit_task(smiles)
+            task_id = self._submit_task(smiles, request_models)
             
             # Poll for results
             result = self._poll_for_results(task_id, smiles, property_name, max_polls)
@@ -139,7 +192,7 @@ class ProtoxHandler:
             }
 
     def predict_batch(
-        self, smiles_list: List[str], property_name: str = "toxicity", max_polls: Optional[int] = None
+        self, smiles_list: List[str], property_name: str = "toxicity", max_polls: Optional[int] = None, models: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """Predict molecular properties for a batch of SMILES strings.
 
@@ -149,17 +202,21 @@ class ProtoxHandler:
             smiles_list: List of SMILES strings to process
             property_name: The molecular property to predict
             max_polls: Maximum number of polls before timing out (None = unlimited)
+            models: Optional list of specific models to request (None = use default)
 
         Returns:
             List of dictionaries containing prediction results
         """
+        # Use provided models or default
+        request_models = models or self.models
+
         # Submit all tasks
         task_list = []
         for smiles in smiles_list:
             if not smiles or smiles.strip() == "":
                 continue
             try:
-                task_id = self._submit_task(smiles)
+                task_id = self._submit_task(smiles, request_models)
                 task_list.append({"task_id": task_id, "smiles": smiles})
             except Exception as e:
                 logger.error(f"Error submitting SMILES {smiles}: {str(e)}")
@@ -225,6 +282,14 @@ class ProtoxHandler:
         """
         return self.AVAILABLE_PROPERTIES.copy()
 
+    def get_available_models(self) -> Dict[str, str]:
+        """Return available toxicity models.
+
+        Returns:
+            Dictionary mapping model names to descriptions
+        """
+        return self.AVAILABLE_MODELS.copy()
+
     def clear_cache(self) -> None:
         """Clear the internal task cache."""
         self._task_cache.clear()
@@ -237,29 +302,63 @@ class ProtoxHandler:
         """
         return len(self._task_cache)
 
-    def _submit_task(self, smiles: str) -> str:
+    def _submit_task(self, smiles: str, models: Optional[List[str]] = None) -> str:
         """Submit a SMILES string to Protox API for prediction.
 
         Args:
             smiles: SMILES string to predict
+            models: Optional list of models to request (None = use default)
 
         Returns:
             Task ID for tracking the prediction
 
         Raises:
             httpx.RequestError: If HTTP request fails
-            ValueError: If API returns an error
+            QuotaExceededException: If daily quota exceeded (403)
+            RateLimitedException: If rate limited (429)
+            ValueError: If API returns unexpected response
         """
+        request_models = models or self.models
+        
+        payload = {
+            "input_type": self.input_type,
+            "input": smiles,
+            "requested_data": json.dumps(request_models),
+        }
+
         with httpx.Client(timeout=self.timeout) as client:
-            payload = {"smi": smiles}
-            response = client.post(self.submit_url, data=payload)
-            response.raise_for_status()
+            response = client.post(self.enqueue_url, data=payload)
 
-            task_id = response.text.strip()
-            if not task_id:
-                raise ValueError("No task ID returned from submission")
+            # Handle success
+            if response.status_code == 200:
+                task_id = response.text.strip()
+                if not task_id:
+                    raise ValueError("No task ID returned from submission")
 
-            return task_id
+                # Respect Retry-After header
+                retry_after = int(response.headers.get("Retry-After", 5)) + 1
+                logger.info(f"Task submitted successfully. Waiting {retry_after}s before next request...")
+                time.sleep(retry_after)
+                return task_id
+
+            # Handle rate limiting
+            elif response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 5)) + 1
+                error_msg = f"Rate limited by Protox. Retry-After: {retry_after}s"
+                logger.warning(error_msg)
+                raise RateLimitedException(error_msg)
+
+            # Handle quota exceeded
+            elif response.status_code == 403:
+                error_msg = "Daily quota exceeded for Protox API"
+                logger.error(error_msg)
+                raise QuotaExceededException(error_msg)
+
+            # Handle other errors
+            else:
+                error_msg = f"Protox API error {response.status_code}: {response.reason}"
+                logger.error(error_msg)
+                raise httpx.RequestError(error_msg)
 
     def _retrieve_task_status(self, task_id: str) -> httpx.Response:
         """Check the status of a submitted task.

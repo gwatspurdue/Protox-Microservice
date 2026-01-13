@@ -30,6 +30,10 @@ class PredictionRequest(BaseModel):
         default="toxicity",
         description="Molecular property to predict",
     )
+    models: Optional[List[str]] = Field(
+        default=None,
+        description="Specific toxicity models to request (None = all available)",
+    )
     max_polls: Optional[int] = Field(
         default=None,
         description="Maximum number of polls before timing out (None = unlimited)",
@@ -68,6 +72,10 @@ class BatchPredictionRequest(BaseModel):
     property: str = Field(
         default="toxicity",
         description="Molecular property to predict",
+    )
+    models: Optional[List[str]] = Field(
+        default=None,
+        description="Specific toxicity models to request (None = all available)",
     )
     max_polls: Optional[int] = Field(
         default=None,
@@ -116,6 +124,17 @@ async def get_available_properties() -> Dict[str, Any]:
     return {"properties": properties, "count": len(properties)}
 
 
+@app.get("/models", tags=["Properties"])
+async def get_available_models() -> Dict[str, Any]:
+    """Get list of available toxicity models.
+
+    Returns:
+        Dictionary mapping model names to descriptions
+    """
+    models = handler.get_available_models()
+    return {"models": models, "count": len(models)}
+
+
 @app.post("/submit", response_model=SubmitPredictionResponse, tags=["Predictions"])
 async def submit_prediction(request: PredictionRequest) -> SubmitPredictionResponse:
     """Submit a prediction task to Protox API.
@@ -147,7 +166,7 @@ async def submit_prediction(request: PredictionRequest) -> SubmitPredictionRespo
         )
 
     # Submit prediction
-    result = handler.submit_prediction(request.smiles, request.property)
+    result = handler.submit_prediction(request.smiles, request.property, request.models)
 
     if result["status"] == "error":
         raise HTTPException(status_code=400, detail=result["error"])
@@ -190,7 +209,7 @@ async def predict_single(request: PredictionRequest) -> PredictionResponse:
         )
 
     # Process prediction
-    result = handler.predict_single(request.smiles, request.property, request.max_polls)
+    result = handler.predict_single(request.smiles, request.property, request.max_polls, request.models)
 
     # Check for errors
     if result["status"] == "error":
@@ -242,7 +261,7 @@ async def predict_batch(
 
     # Process batch predictions
     results = handler.predict_batch(
-        request.smiles_list, request.property, request.max_polls
+        request.smiles_list, request.property, request.max_polls, request.models
     )
 
     # Check if any predictions succeeded

@@ -111,6 +111,30 @@ Returns list of supported molecular properties.
 }
 ```
 
+#### Get Available Models
+```
+GET /models
+```
+
+Returns list of available toxicity models with descriptions.
+
+**Response:**
+```json
+{
+  "models": {
+    "bbb": "Blood-brain barrier permeability",
+    "hia": "Human intestinal absorption",
+    "pgp": "P-glycoprotein inhibitor",
+    "cyp2d6": "CYP2D6 inhibitor",
+    "cyp3a4": "CYP3A4 inhibitor",
+    "ames": "Ames mutagenicity",
+    "skin_sens": "Skin sensitization",
+    "acute_tox": "Acute toxicity"
+  },
+  "count": 8
+}
+```
+
 #### Submit Prediction (Asynchronous)
 ```
 POST /submit
@@ -118,11 +142,12 @@ Content-Type: application/json
 
 {
   "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
-  "property": "toxicity"
+  "property": "toxicity",
+  "models": ["bbb", "hia", "pgp"]
 }
 ```
 
-Submit a prediction task and receive a task ID for polling. Use this for long-running predictions where you don't want to block the HTTP connection.
+Submit a prediction task and receive a task ID for polling. Optionally specify which models to request. Use this for long-running predictions where you don't want to block the HTTP connection.
 
 **Response:**
 ```json
@@ -165,11 +190,12 @@ Content-Type: application/json
 {
   "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
   "property": "toxicity",
+  "models": ["bbb", "hia"],
   "max_polls": null
 }
 ```
 
-Submit a prediction task and automatically poll for results. This endpoint blocks until the task completes (or times out).
+Submit a prediction task and automatically poll for results. This endpoint blocks until the task completes (or times out). Optionally specify which models to request.
 
 **Response (Success):**
 ```json
@@ -205,11 +231,12 @@ Content-Type: application/json
     "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
     "CC(=O)Oc1ccccc1C(=O)O"
   ],
-  "property": "toxicity"
+  "property": "toxicity",
+  "models": ["bbb", "hia"]
 }
 ```
 
-Submit multiple SMILES strings for prediction. Submits all tasks, then polls for all results.
+Submit multiple SMILES strings for prediction. Submits all tasks, then polls for all results. Optionally specify which models to request.
 
 **Response:**
 ```json
@@ -329,32 +356,48 @@ Protox-Microservice/
 
 The microservice implements Protox's asynchronous prediction workflow:
 
-1. **Submit** (`_submit_task`): Send SMILES to `api_submit.php`, receive task ID
-2. **Poll** (`_retrieve_task_status`): Check if task completed at `api_retrieve.php` (30-second intervals)
-3. **Download** (`_get_results`): Retrieve TSV results file from Protox server
-4. **Parse**: Extract prediction values from DataFrame
+1. **Enqueue** (`_submit_task`): Send SMILES to `api_enqueue.php` with requested models, receive task ID
+2. **Rate Limiting**: Respect `Retry-After` headers and automatic sleep between requests
+3. **Poll** (`_retrieve_task_status`): Check if task completed at `api_retrieve.php` (30-second intervals)
+4. **Download** (`_get_results`): Retrieve TSV results file from Protox server
+5. **Parse**: Extract prediction values from DataFrame
+
+### Request Format
+
+The `api_enqueue.php` endpoint accepts:
+- `input_type`: Type of input (default: "smiles")
+- `input`: The SMILES string to predict
+- `requested_data`: JSON-encoded list of toxicity models to request
+
+### Rate Limiting and Quota Management
+
+- **429 (Too Many Requests)**: Automatically respects `Retry-After` header
+- **403 (Forbidden)**: Raises `QuotaExceededException` when daily quota exceeded
+- **Sleep on Success**: Automatically sleeps for `Retry-After` seconds after successful submissions
 
 ### Separation of Concerns
 
 - **main.py**: HTTP request/response handling, input validation, route definitions
-- **protox_handler.py**: Protox API interactions, task submission, polling, result retrieval, data processing
+- **protox_handler.py**: Protox API interactions, task submission, polling, result retrieval, data processing, rate limiting
 
 ### Key Components
 
 #### ProtoxHandler (protox_handler.py)
-- Submits SMILES strings and receives task IDs
+- Submits SMILES strings via `api_enqueue.php` with configurable models
+- Handles rate limiting with `Retry-After` headers
+- Detects and raises exceptions for quota exceeded (403) and rate limiting (429)
 - Polls task status at configurable intervals (default: 30 seconds)
 - Retrieves and parses TSV result files from Protox
 - Caches completed results to avoid re-downloading
-- Validates input properties (currently only "toxicity")
+- Supports per-request model selection or uses default models
 - Provides both synchronous (with polling) and asynchronous (task ID only) interfaces
-- Comprehensive error handling with structured responses
+- Comprehensive logging for debugging
 
 #### FastAPI Application (main.py)
 - Exposes REST endpoints for submission and polling
 - Implements Pydantic request/response models
 - Validates user input at HTTP layer
-- Provides both synchronous and asynchronous interfaces
+- Provides both synchronous and asynchronous interfaces with model selection
 - Converts handler results to HTTP responses with proper status codes
 
 ## Error Handling
@@ -380,11 +423,27 @@ Error responses include a `detail` field with actionable messages:
 
 Configure the service using environment variables in `env.yml`:
 
-- `PROTOX_SUBMIT_URL`: Protox submission endpoint (default: https://tox.charite.de/protox3/src/api_submit.php)
+- `PROTOX_ENQUEUE_URL`: Protox enqueue endpoint (default: https://tox.charite.de/protox3/src/api_enqueue.php)
 - `PROTOX_RETRIEVE_URL`: Protox task status endpoint (default: https://tox.charite.de/protox3/src/api_retrieve.php)
 - `PROTOX_RESULT_BASE_URL`: Protox results file base URL (default: https://tox.charite.de/protox3/csv)
 - `PROTOX_TIMEOUT`: HTTP request timeout in seconds (default: 30)
 - `PROTOX_POLL_INTERVAL`: Polling interval in seconds (default: 30)
+- `PROTOX_INPUT_TYPE`: Type of input data (default: "smiles")
+- `PROTOX_MODELS`: Comma-separated list of default models to request
+
+### Available Toxicity Models
+
+The following toxicity models are available for prediction:
+- **bbb**: Blood-brain barrier permeability
+- **hia**: Human intestinal absorption
+- **pgp**: P-glycoprotein inhibitor
+- **cyp2d6**: CYP2D6 inhibitor
+- **cyp3a4**: CYP3A4 inhibitor
+- **ames**: Ames mutagenicity
+- **skin_sens**: Skin sensitization
+- **acute_tox**: Acute toxicity
+
+Request specific models via the `models` parameter or leave unset to use defaults.
 
 ### Result Caching
 
