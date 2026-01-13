@@ -31,8 +31,8 @@ This approach allows the microservice to handle long-running predictions without
 ## Installation
 
 ### Prerequisites
-- Python 3.8 or higher
-- pip (Python package manager)
+- Conda (Miniconda or Anaconda)
+- Python 3.9+
 
 ### Setup
 
@@ -42,15 +42,21 @@ git clone <repository-url>
 cd Protox-Microservice
 ```
 
-2. Install dependencies:
+2. Create conda environment:
 ```bash
-pip install -r requirements.txt
+conda env create -f env.yml
+conda activate protox-microservice
 ```
 
 3. Configure environment variables (optional):
 ```bash
-cp env.yml.example env.yml
-# Edit env.yml with your Protox API configuration
+# Edit .env file with your Protox API configuration
+# Default configuration is already set in .env
+```
+
+Alternatively, if you prefer to use pip:
+```bash
+pip install -r requirements.txt
 ```
 
 ## Running the Service
@@ -124,14 +130,53 @@ Returns list of available toxicity models with descriptions.
   "models": {
     "bbb": "Blood-brain barrier permeability",
     "hia": "Human intestinal absorption",
-    "pgp": "P-glycoprotein inhibitor",
+    "cyp1a2": "CYP1A2 inhibitor",
+    "cyp2c19": "CYP2C19 inhibitor",
+    "cyp2c9": "CYP2C9 inhibitor",
     "cyp2d6": "CYP2D6 inhibitor",
+    "cyp2e1": "CYP2E1 inhibitor",
     "cyp3a4": "CYP3A4 inhibitor",
+    "dili": "Drug-induced liver injury",
+    "neuro": "Neurotoxicity",
+    "nephro": "Nephrotoxicity",
+    "respi": "Respiratory toxicity",
+    "cardio": "Cardiotoxicity",
+    "carcino": "Carcinogenicity",
+    "immuno": "Immunotoxicity",
+    "mutagen": "Mutagenicity",
+    "cyto": "Cytotoxicity",
     "ames": "Ames mutagenicity",
-    "skin_sens": "Skin sensitization",
-    "acute_tox": "Acute toxicity"
+    "eco": "Ecotoxicity",
+    "clinical": "Clinical toxicity",
+    "nutri": "Nutritional toxicity",
+    "nr_ahr": "Aryl hydrocarbon receptor (AhR)",
+    "nr_ar": "Androgen receptor (AR)",
+    "nr_ar_lbd": "Androgen receptor LBD",
+    "nr_aromatase": "Aromatase inhibition",
+    "nr_er": "Estrogen receptor (ER)",
+    "nr_er_lbd": "Estrogen receptor LBD",
+    "nr_ppar_gamma": "PPAR gamma receptor",
+    "sr_are": "Antioxidant response element (ARE)",
+    "sr_hse": "Heat shock element (HSE)",
+    "sr_mmp": "Mitochondrial membrane potential",
+    "sr_p53": "p53 response element",
+    "sr_atad5": "ATAD5 response",
+    "mie_thr_alpha": "Thrombin alpha target",
+    "mie_thr_beta": "Thrombin beta target",
+    "mie_ttr": "Transthyretin binder",
+    "mie_ryr": "Ryanodine receptor",
+    "mie_gabar": "GABA-A receptor",
+    "mie_nmdar": "NMDA receptor",
+    "mie_ampar": "AMPA receptor",
+    "mie_kar": "Kainate receptor",
+    "mie_ache": "Acetylcholinesterase",
+    "mie_car": "Carbamate target",
+    "mie_pxr": "Pregnane X receptor",
+    "mie_nadhox": "NADH oxidase",
+    "mie_vgsc": "Voltage-gated sodium channel",
+    "mie_nis": "Sodium-iodide symporter"
   },
-  "count": 8
+  "count": 51
 }
 ```
 
@@ -143,7 +188,7 @@ Content-Type: application/json
 {
   "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
   "property": "toxicity",
-  "models": ["bbb", "hia", "pgp"]
+  "models": ["dili", "neuro", "cardio", "bbb", "hia"]
 }
 ```
 
@@ -190,7 +235,7 @@ Content-Type: application/json
 {
   "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
   "property": "toxicity",
-  "models": ["bbb", "hia"],
+  "models": ["dili", "neuro", "cardio"],
   "max_polls": null
 }
 ```
@@ -232,7 +277,7 @@ Content-Type: application/json
     "CC(=O)Oc1ccccc1C(=O)O"
   ],
   "property": "toxicity",
-  "models": ["bbb", "hia"]
+  "models": ["dili", "neuro", "cardio", "ames", "cyto"]
 }
 ```
 
@@ -302,7 +347,7 @@ For quick predictions, use the `/predict` endpoint which handles submission and 
 ```bash
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "property": "toxicity"}'
+  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "property": "toxicity", "models": ["dili", "neuro", "cardio"]}'
 ```
 
 ### Pattern 2: Asynchronous Predictions (Advanced)
@@ -313,7 +358,7 @@ For handling many predictions or avoiding blocking calls, use `/submit` and then
 # Submit task
 RESPONSE=$(curl -X POST http://localhost:8000/submit \
   -H "Content-Type: application/json" \
-  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "property": "toxicity"}')
+  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "property": "toxicity", "models": ["dili", "neuro"]}')
 
 TASK_ID=$(echo $RESPONSE | jq -r '.task_id')
 
@@ -333,7 +378,8 @@ curl -X POST http://localhost:8000/predict-batch \
   -H "Content-Type: application/json" \
   -d '{
     "smiles_list": ["CC(C)Cc1ccc(cc1)C(C)C(=O)O", "CC(=O)Oc1ccccc1C(=O)O"],
-    "property": "toxicity"
+    "property": "toxicity",
+    "models": ["dili", "neuro", "cardio", "ames"]
   }'
 ```
 
@@ -421,7 +467,7 @@ Error responses include a `detail` field with actionable messages:
 
 ### Environment Variables
 
-Configure the service using environment variables in `env.yml`:
+Configure the service using environment variables in `.env` file:
 
 - `PROTOX_ENQUEUE_URL`: Protox enqueue endpoint (default: https://tox.charite.de/protox3/src/api_enqueue.php)
 - `PROTOX_RETRIEVE_URL`: Protox task status endpoint (default: https://tox.charite.de/protox3/src/api_retrieve.php)
@@ -433,17 +479,66 @@ Configure the service using environment variables in `env.yml`:
 
 ### Available Toxicity Models
 
-The following toxicity models are available for prediction:
+Protox provides 51 toxicity prediction models organized by category:
+
+#### ADME Models
 - **bbb**: Blood-brain barrier permeability
 - **hia**: Human intestinal absorption
-- **pgp**: P-glycoprotein inhibitor
+- **cyp1a2**: CYP1A2 inhibitor
+- **cyp2c19**: CYP2C19 inhibitor
+- **cyp2c9**: CYP2C9 inhibitor
 - **cyp2d6**: CYP2D6 inhibitor
+- **cyp2e1**: CYP2E1 inhibitor
 - **cyp3a4**: CYP3A4 inhibitor
-- **ames**: Ames mutagenicity
-- **skin_sens**: Skin sensitization
-- **acute_tox**: Acute toxicity
 
-Request specific models via the `models` parameter or leave unset to use defaults.
+#### Toxicity Endpoints
+- **dili**: Drug-induced liver injury
+- **neuro**: Neurotoxicity
+- **nephro**: Nephrotoxicity
+- **respi**: Respiratory toxicity
+- **cardio**: Cardiotoxicity
+- **carcino**: Carcinogenicity
+- **immuno**: Immunotoxicity
+- **mutagen**: Mutagenicity
+- **cyto**: Cytotoxicity
+- **ames**: Ames mutagenicity
+- **eco**: Ecotoxicity
+- **clinical**: Clinical toxicity
+- **nutri**: Nutritional toxicity
+
+#### Nuclear Receptor Models
+- **nr_ahr**: Aryl hydrocarbon receptor (AhR)
+- **nr_ar**: Androgen receptor (AR)
+- **nr_ar_lbd**: Androgen receptor LBD
+- **nr_aromatase**: Aromatase inhibition
+- **nr_er**: Estrogen receptor (ER)
+- **nr_er_lbd**: Estrogen receptor LBD
+- **nr_ppar_gamma**: PPAR gamma receptor
+
+#### Stress Response Models
+- **sr_are**: Antioxidant response element (ARE)
+- **sr_hse**: Heat shock element (HSE)
+- **sr_mmp**: Mitochondrial membrane potential
+- **sr_p53**: p53 response element
+- **sr_atad5**: ATAD5 response
+
+#### Molecular Initiating Events
+- **mie_thr_alpha**: Thrombin alpha target
+- **mie_thr_beta**: Thrombin beta target
+- **mie_ttr**: Transthyretin binder
+- **mie_ryr**: Ryanodine receptor
+- **mie_gabar**: GABA-A receptor
+- **mie_nmdar**: NMDA receptor
+- **mie_ampar**: AMPA receptor
+- **mie_kar**: Kainate receptor
+- **mie_ache**: Acetylcholinesterase
+- **mie_car**: Carbamate target
+- **mie_pxr**: Pregnane X receptor
+- **mie_nadhox**: NADH oxidase
+- **mie_vgsc**: Voltage-gated sodium channel
+- **mie_nis**: Sodium-iodide symporter
+
+Request specific models via the `models` parameter or leave unset to use all available models.
 
 ### Result Caching
 
@@ -468,14 +563,14 @@ To test the API, you can use:
 ```bash
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "property": "toxicity"}'
+  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "property": "toxicity", "models": ["dili", "neuro", "cardio"]}'
 ```
 
 ### cURL - Submit Task
 ```bash
 curl -X POST http://localhost:8000/submit \
   -H "Content-Type: application/json" \
-  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "property": "toxicity"}'
+  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "property": "toxicity", "models": ["dili", "neuro"]}'
 ```
 
 ### cURL - Check Task Status
@@ -483,19 +578,29 @@ curl -X POST http://localhost:8000/submit \
 curl -X GET "http://localhost:8000/status/task_12345"
 ```
 
+### cURL - Get Available Models
+```bash
+curl -X GET "http://localhost:8000/models"
+```
+
 ### Python
 ```python
 import httpx
 
-# Synchronous prediction
+# Synchronous prediction with specific models
 response = httpx.post(
     "http://localhost:8000/predict",
     json={
         "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
-        "property": "toxicity"
+        "property": "toxicity",
+        "models": ["dili", "neuro", "cardio", "ames"]
     }
 )
 print(response.json())
+
+# Get available models
+models_response = httpx.get("http://localhost:8000/models")
+print(models_response.json())
 ```
 
 ### Docker (Optional)

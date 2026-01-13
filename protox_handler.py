@@ -38,14 +38,58 @@ class ProtoxHandler:
 
     # Available toxicity models
     AVAILABLE_MODELS: Dict[str, str] = {
+        # ADME models
         "bbb": "Blood-brain barrier permeability",
         "hia": "Human intestinal absorption",
-        "pgp": "P-glycoprotein inhibitor",
+        "cyp1a2": "CYP1A2 inhibitor",
+        "cyp2c19": "CYP2C19 inhibitor",
+        "cyp2c9": "CYP2C9 inhibitor",
         "cyp2d6": "CYP2D6 inhibitor",
+        "cyp2e1": "CYP2E1 inhibitor",
         "cyp3a4": "CYP3A4 inhibitor",
+        # Toxicity endpoints
+        "dili": "Drug-induced liver injury",
+        "neuro": "Neurotoxicity",
+        "nephro": "Nephrotoxicity",
+        "respi": "Respiratory toxicity",
+        "cardio": "Cardiotoxicity",
+        "carcino": "Carcinogenicity",
+        "immuno": "Immunotoxicity",
+        "mutagen": "Mutagenicity",
+        "cyto": "Cytotoxicity",
         "ames": "Ames mutagenicity",
-        "skin_sens": "Skin sensitization",
-        "acute_tox": "Acute toxicity",
+        "eco": "Ecotoxicity",
+        "clinical": "Clinical toxicity",
+        "nutri": "Nutritional toxicity",
+        # Nuclear receptor models
+        "nr_ahr": "Aryl hydrocarbon receptor (AhR)",
+        "nr_ar": "Androgen receptor (AR)",
+        "nr_ar_lbd": "Androgen receptor LBD",
+        "nr_aromatase": "Aromatase inhibition",
+        "nr_er": "Estrogen receptor (ER)",
+        "nr_er_lbd": "Estrogen receptor LBD",
+        "nr_ppar_gamma": "PPAR gamma receptor",
+        # Stress response models
+        "sr_are": "Antioxidant response element (ARE)",
+        "sr_hse": "Heat shock element (HSE)",
+        "sr_mmp": "Mitochondrial membrane potential",
+        "sr_p53": "p53 response element",
+        "sr_atad5": "ATAD5 response",
+        # Molecular initiating events
+        "mie_thr_alpha": "Thrombin alpha target",
+        "mie_thr_beta": "Thrombin beta target",
+        "mie_ttr": "Transthyretin binder",
+        "mie_ryr": "Ryanodine receptor",
+        "mie_gabar": "GABA-A receptor",
+        "mie_nmdar": "NMDA receptor",
+        "mie_ampar": "AMPA receptor",
+        "mie_kar": "Kainate receptor",
+        "mie_ache": "Acetylcholinesterase",
+        "mie_car": "Carbamate target",
+        "mie_pxr": "Pregnane X receptor",
+        "mie_nadhox": "NADH oxidase",
+        "mie_vgsc": "Voltage-gated sodium channel",
+        "mie_nis": "Sodium-iodide symporter",
     }
 
     # Available properties for predictions
@@ -62,6 +106,7 @@ class ProtoxHandler:
         poll_interval: Optional[int] = None,
         models: Optional[List[str]] = None,
         input_type: str = "smiles",
+        verify_ssl: bool = False,
     ):
         """Initialize the Protox handler.
 
@@ -73,6 +118,7 @@ class ProtoxHandler:
             poll_interval: Optional custom polling interval in seconds
             models: List of toxicity models to request (default: all available)
             input_type: Type of input data, e.g., 'smiles' (default: 'smiles')
+            verify_ssl: Whether to verify SSL certificates (default: False due to expired certs)
         """
         self.enqueue_url = enqueue_url or self.ENQUEUE_URL
         self.retrieve_url = retrieve_url or self.RETRIEVE_URL
@@ -81,6 +127,7 @@ class ProtoxHandler:
         self.poll_interval = poll_interval or self.POLL_INTERVAL
         self.input_type = input_type
         self.models = models or list(self.AVAILABLE_MODELS.keys())
+        self.verify_ssl = verify_ssl
         self._task_cache: Dict[str, Any] = {}  # Maps task_id to results
 
     def submit_prediction(

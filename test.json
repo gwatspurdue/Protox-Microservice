@@ -1,0 +1,6 @@
+{
+  "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+  "property": "toxicity",
+  "models": ["dili", "neuro", "cardio"],
+  "max_polls": null
+}

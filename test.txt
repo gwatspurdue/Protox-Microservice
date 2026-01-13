@@ -1,5 +1,0 @@
-CCCCCC
-CC(=O)NCCC1=CNc2c1cc(OC)cc2
-CN1CCC[C@H]1c2cccnc2
-OCCc1c(C)[n+](cs1)Cc2cnc(C)nc2N
-CN=C=O
