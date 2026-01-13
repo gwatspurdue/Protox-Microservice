@@ -373,7 +373,7 @@ class ProtoxHandler:
             "requested_data": json.dumps(request_models),
         }
 
-        with httpx.Client(timeout=self.timeout) as client:
+        with httpx.Client(timeout=self.timeout, verify=self.verify_ssl) as client:
             response = client.post(self.enqueue_url, data=payload)
 
             # Handle success
@@ -419,7 +419,7 @@ class ProtoxHandler:
         Raises:
             httpx.RequestError: If HTTP request fails
         """
-        with httpx.Client(timeout=self.timeout) as client:
+        with httpx.Client(timeout=self.timeout, verify=self.verify_ssl) as client:
             payload = {"id": task_id}
             response = client.post(self.retrieve_url, data=payload)
             response.raise_for_status()
@@ -443,7 +443,7 @@ class ProtoxHandler:
 
         result_url = f"{self.result_base_url}/{task_id}_result.csv"
         
-        with httpx.Client(timeout=self.timeout) as client:
+        with httpx.Client(timeout=self.timeout, verify=self.verify_ssl) as client:
             response = client.get(result_url)
             response.raise_for_status()
 
