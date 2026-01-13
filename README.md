@@ -1,4 +1,4 @@
-# Protox Microservice
+# Protox Microservice (NO CONTAINER YET)
 
 A FastAPI microservice for molecular property predictions using the Protox API.
 
