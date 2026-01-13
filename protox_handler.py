@@ -367,10 +367,13 @@ class ProtoxHandler:
         """
         request_models = models or self.models
         
+        # Format models as space-separated string as per API documentation
+        models_str = " ".join(request_models)
+        
         payload = {
             "input_type": self.input_type,
             "input": smiles,
-            "requested_data": json.dumps(request_models),
+            "requested_data": models_str,
         }
 
         with httpx.Client(timeout=self.timeout, verify=self.verify_ssl) as client:
@@ -403,7 +406,7 @@ class ProtoxHandler:
 
             # Handle other errors
             else:
-                error_msg = f"Protox API error {response.status_code}: {response.reason}"
+                error_msg = f"Protox API error {response.status_code}: {response.reason_phrase}"
                 logger.error(error_msg)
                 raise httpx.RequestError(error_msg)
 

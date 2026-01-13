@@ -79,6 +79,24 @@ The service will be available at `http://localhost:8000`
 
 ## API Documentation
 
+### Protocol Details
+
+This microservice communicates with the official Protox API using the following protocol:
+
+- **Request Format**: Form-encoded POST requests with fields:
+  - `input_type`: Type of input (default: "smiles" for SMILES strings)
+  - `input`: The SMILES string or compound identifier to predict
+  - `requested_data`: Space-separated list of model names (e.g., "dili neuro cardio bbb hia")
+
+- **Response Format**: CSV file with columns:
+  - `input`: The submitted SMILES or compound name
+  - `type`: "acute toxicity", "toxicity model", or "toxicity target"
+  - `Target`: The model/target name
+  - `Prediction`: The predicted value (LD50, boolean, or probability)
+  - `Probability`: Confidence metric (similarity %, confidence 0-1, or pharmacophore fit 0-1)
+
+- **Rate Limiting**: Maximum 250 API queries per day per source IP
+
 ### Interactive API Docs
 
 Once running, access the interactive API documentation:
@@ -342,45 +360,163 @@ Clears the internal result cache.
 
 ### Pattern 1: Synchronous Predictions (Simple)
 
-For quick predictions, use the `/predict` endpoint which handles submission and polling automatically:
+Submit a single SMILES string and wait for results. The endpoint automatically polls until completion:
 
+**Basic prediction with all default models:**
 ```bash
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "property": "toxicity", "models": ["dili", "neuro", "cardio"]}'
+  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O"}'
 ```
 
-### Pattern 2: Asynchronous Predictions (Advanced)
-
-For handling many predictions or avoiding blocking calls, use `/submit` and then `/status/{task_id}`:
-
+**Prediction with specific models:**
 ```bash
-# Submit task
-RESPONSE=$(curl -X POST http://localhost:8000/submit \
+curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
-  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O", "property": "toxicity", "models": ["dili", "neuro"]}')
+  -d '{
+    "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+    "property": "toxicity",
+    "models": ["dili", "neuro", "cardio", "bbb", "hia"]
+  }'
+```
 
-TASK_ID=$(echo $RESPONSE | jq -r '.task_id')
+**Using a JSON file:**
+```bash
+# Create prediction request file
+cat > prediction.json << 'EOF'
+{
+  "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+  "property": "toxicity",
+  "models": ["dili", "neuro", "cardio"]
+}
+EOF
 
-# Poll for status
+# Send the prediction request
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d @prediction.json
+```
+
+**Response example:**
+```json
+{
+  "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+  "property": "toxicity",
+  "task_id": "task_12345",
+  "status": "success",
+  "prediction": 0.75,
+  "error": null
+}
+```
+
+### Pattern 2: Asynchronous Predictions (Non-blocking)
+
+Submit a task and manually poll for results. Useful for handling many predictions concurrently:
+
+**Submit task:**
+```bash
+curl -X POST http://localhost:8000/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+    "property": "toxicity",
+    "models": ["dili", "neuro", "cardio"]
+  }'
+```
+
+**Response:**
+```json
+{
+  "status": "submitted",
+  "task_id": "task_12345",
+  "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+  "property": "toxicity"
+}
+```
+
+**Check task status:**
+```bash
+curl http://localhost:8000/status/task_12345
+```
+
+**Automated polling script:**
+```bash
+# Submit and extract task ID
+TASK_ID=$(curl -s -X POST http://localhost:8000/submit \
+  -H "Content-Type: application/json" \
+  -d '{"smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O"}' | grep -o '"task_id":"[^"]*' | cut -d'"' -f4)
+
+echo "Task submitted: $TASK_ID"
+
+# Poll for completion
 while true; do
-  curl -X GET "http://localhost:8000/status/$TASK_ID"
-  sleep 30
+  RESPONSE=$(curl -s http://localhost:8000/status/$TASK_ID)
+  STATUS=$(echo "$RESPONSE" | grep -o '"status":"[^"]*' | cut -d'"' -f4)
+  echo "Status: $STATUS"
+  
+  if [ "$STATUS" = "completed" ]; then
+    echo "Task completed!"
+    echo "Full response: $RESPONSE"
+    break
+  fi
+  
+  sleep 5
 done
 ```
 
 ### Pattern 3: Batch Predictions
 
-Submit multiple SMILES at once:
+Submit multiple SMILES strings at once:
 
 ```bash
 curl -X POST http://localhost:8000/predict-batch \
   -H "Content-Type: application/json" \
   -d '{
-    "smiles_list": ["CC(C)Cc1ccc(cc1)C(C)C(=O)O", "CC(=O)Oc1ccccc1C(=O)O"],
+    "smiles_list": [
+      "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+      "CC(=O)Oc1ccccc1C(=O)O",
+      "c1ccccc1"
+    ],
     "property": "toxicity",
-    "models": ["dili", "neuro", "cardio", "ames"]
+    "models": ["dili", "neuro", "cardio", "ames", "cyto"]
   }'
+```
+
+**Response:**
+```json
+{
+  "count": 3,
+  "property": "toxicity",
+  "status": "partial",
+  "results": [
+    {
+      "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+      "property": "toxicity",
+      "task_id": "task_12345",
+      "status": "success",
+      "prediction": 0.75,
+      "error": null
+    },
+    ...
+  ]
+}
+```
+
+### Pattern 4: Working with Models
+
+**List available models:**
+```bash
+curl http://localhost:8000/models
+```
+
+**List supported properties:**
+```bash
+curl http://localhost:8000/properties
+```
+
+**Health check:**
+```bash
+curl http://localhost:8000/health
 ```
 
 

@@ -1,5 +1,5 @@
 {
-  "smiles": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+  "smiles": "CC(=O)NC1=CC=C(O)C=C1",
   "property": "toxicity",
   "models": ["dili", "neuro", "cardio"],
   "max_polls": null
